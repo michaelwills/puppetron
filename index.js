@@ -7,6 +7,13 @@ const puppeteer = require('puppeteer');
 const jimp = require('jimp');
 const pTimeout = require('p-timeout');
 const LRU = require('lru-cache');
+
+const sleep = (time) => {
+    return new Promise((resolve) => {
+        setTimeout(() => resolve(), time);
+    })
+};
+
 const cache = LRU({
   max: process.env.CACHE_SIZE || Infinity,
   maxAge: 1000 * 60, // 1 minute
@@ -36,8 +43,7 @@ require('http').createServer(async (req, res) => {
 
   if (req.url == '/'){
     res.writeHead(200, {
-      'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'public,max-age=31536000',
+      'content-type': 'text/html; charset=utf-8'
     });
     res.end(fs.readFileSync('index.html'));
     return;
@@ -73,7 +79,11 @@ require('http').createServer(async (req, res) => {
     return;
   }
 
-  if (cache.itemCount > 20){
+  const { searchParams: params , ...other} = new URL(url);
+  const maxTimeout = parseInt(params.get('timeout'), 10) || 20;
+  const waitTime = parseInt(params.get('wait'), 10) || 10;
+
+  if (cache.itemCount > 100){
     res.writeHead(420, {
       'content-type': 'text/plain',
     });
@@ -110,9 +120,11 @@ require('http').createServer(async (req, res) => {
     let actionDone = false;
     const width = parseInt(searchParams.get('width'), 10) || 1024;
     const height = parseInt(searchParams.get('height'), 10) || 768;
+    const force = Boolean(searchParams.get('force')) || false;
+    console.log('force load: ', force)
 
     page = cache.get(pageURL);
-    if (!page) {
+    if (!page || force) {
       if (!browser) {
         console.log('🚀 Launch browser!');
         const config = {
@@ -147,9 +159,9 @@ require('http').createServer(async (req, res) => {
         const seconds = (+new Date() - nowTime) / 1000;
         const shortURL = truncate(url, 70);
         const otherResources = /^(manifest|other)$/i.test(resourceType);
-        // Abort requests that exceeds 15 seconds
-        // Also abort if more than 100 requests
-        if (seconds > 15 || reqCount > 100 || actionDone){
+        // Abort requests that exceeds maxTime + 10 seconds
+        // Also abort if more than 500 requests
+        if (seconds > (maxTimeout + 10) || reqCount > 500 || actionDone){
           console.log(`❌⏳ ${method} ${shortURL}`);
           request.abort();
         } else if (blockedRegExp.test(url) || otherResources){
@@ -182,7 +194,9 @@ require('http').createServer(async (req, res) => {
       await Promise.race([
         responsePromise,
         page.goto(pageURL, {
-          waitUntil: 'networkidle',
+            waitLoad: true,
+            waitNetworkIdle: true,
+            waitUntil: 'networkidle'
         })
       ]);
 
@@ -204,6 +218,8 @@ require('http').createServer(async (req, res) => {
     }
 
     console.log('💥 Perform action: ' + action);
+
+    await sleep(parseInt(waitTime, 10));
 
     switch (action){
       case 'render': {
@@ -251,7 +267,7 @@ require('http').createServer(async (req, res) => {
           content = content.replace(/<!--[\s\S]*?-->/g, '');
 
           return content;
-        }), 10 * 1000, 'Render timed out');
+        }), maxTimeout * 1000, 'Render timed out');
 
         res.writeHead(200, {
           'content-type': 'text/html; charset=UTF-8',
@@ -267,7 +283,7 @@ require('http').createServer(async (req, res) => {
         const pdf = await pTimeout(page.pdf({
           format,
           pageRanges,
-        }), 10 * 1000, 'PDF timed out');
+        }), maxTimeout * 1000, 'PDF timed out');
 
         res.writeHead(200, {
           'content-type': 'application/pdf',
@@ -278,7 +294,7 @@ require('http').createServer(async (req, res) => {
       }
       default: {
         const thumbWidth = parseInt(searchParams.get('thumbWidth'), 10) || null;
-        const fullPage = searchParams.get('fullPage') == 'true' || false;
+        const fullPage = searchParams.get('all') == 'true' || false;
         const clipSelector = searchParams.get('clipSelector');
 
         let clip;

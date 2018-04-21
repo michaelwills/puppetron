@@ -9,7 +9,7 @@
   "now": {
     "name": "puppetron",
     "type": "docker",
-    "alias": "puppetron.now.sh",
+    "alias": "puppetron-jotlink.now.sh",
     "files": [
       "blocked.json",
       "Dockerfile",
