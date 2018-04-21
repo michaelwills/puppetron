@@ -133,8 +133,11 @@ require('http').createServer(async (req, res) => {
         const config = {
           ignoreHTTPSErrors: true,
           args: [
+            '--disable-gpu',
             '--no-sandbox',
-            '--disable-setuid-sandbox'
+            '--disable-setuid-sandbox',
+            '--disable-web-security',
+            '--shm-size=1gb'
           ],
         }
         if (DEBUG) config.dumpio = true
@@ -146,6 +149,7 @@ require('http').createServer(async (req, res) => {
         browser = await puppeteer.launch(config)
       }
       page = await browser.newPage()
+      await page.setJavaScriptEnabled(true);
 
       const nowTime = +new Date()
       let reqCount = 0
